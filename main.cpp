@@ -42,13 +42,20 @@ int main()
 		resize(frames[i], frames[i], Size(0, 0), 0.5, 0.5, INTER_LINEAR);
 	}
 
-	Mat result = stitch_two_image(frames[0], frames[1]);
-
-	for (int i = 2; i < frames.size(); i++) {
+	Mat result = stitch_two_image(frames[5], frames[6]);
+	
+	/*for (int i = 2; i < frames.size(); i++) {
 		result = stitch_two_image(result, frames[i]);
 		cout << "Stitching image: " << i << "/" << frames.size() << endl;
 	}
-
+	*/
+    for (int i = 7; i <12; i++) {
+		result = stitch_two_image(result, frames[i]);
+		cout << "Stitching image: " << i << "/" << frames.size() << endl;
+	}
+	
+	
+	
 	imshow("result", result);
 
 	waitKey(0);
@@ -93,6 +100,30 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 		dst_pts.push_back(keypoints2[good_matches[i].trainIdx].pt);
 	}
 
+	//두 좌표의 y값의 차이를 저장하기 위한 변수
+	//10 단위씩 끊어서 저장
+	int* subtraction = new int[26];
+	memset(subtraction, 0, 26);
+
+	// 매칭된 좌표 출력
+	for (size_t i = 0; i < good_matches.size(); i++) {
+		cv::Point2i point1 = src_pts[i];
+		cv::Point2i point2 = dst_pts[i];
+		subtraction[point2.y / 10] = point1.y - point2.y;
+	}
+
+	//subtraction의 값을 interpolation으로 정한다.
+	if (subtraction[0] == 0)
+		subtraction[0] = subtraction[1] / 2;
+
+	for (int i = 1; i < 25; i++) {
+		if (subtraction[i] == 0)
+			subtraction[i] = (subtraction[i-1] + subtraction[i + 1]) / 2;
+	}
+
+	if (subtraction[25] == 0)
+		subtraction[25] = subtraction[24] / 2;
+
 	// 변환 행렬 계산
 	cv::Mat H = cv::findHomography(dst_pts, src_pts, cv::RANSAC);
 	// 객체 이미지를 원본 이미지에 붙이기
@@ -131,11 +162,25 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 		}
 	}
 
-	for (int i = 0; i < result.rows; i++) {
-		for (int j = max_pixel; j < result.cols; j++) {
-			result.at<cv::Vec3b>(i, j) = object_image.at<cv::Vec3b>(i, j - max_pixel);
+	for (int yValue = 0; yValue < 26; yValue) {
+		//subtraction이 양수일 때
+		if (subtraction[yValue] > 0) {
+			for (int i = yValue * 10; i < (yValue + 1) * 10 - subtraction[yValue]; i++) {
+				for (int j = max_pixel; j < result.cols; j++) {
+					result.at<cv::Vec3b>(i, j) = object_image.at<cv::Vec3b>(i + subtraction[yValue], j - max_pixel);
+				}
+			}
 		}
-	}
+		else {
+			subtraction[yValue] = -subtraction[yValue];
+			for (int i = yValue * 10 + subtraction[yValue]; i < (yValue + 1) * 10; i++) {
+				for (int j = max_pixel; j < result.cols; j++) {
+					result.at<cv::Vec3b>(i, j) = object_image.at<cv::Vec3b>(i - subtraction[yValue], j - max_pixel);
+				}
+			}
+		}
 
+	}
+	
 	return result;
 }
