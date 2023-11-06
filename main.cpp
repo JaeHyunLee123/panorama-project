@@ -6,6 +6,7 @@
 using namespace std;
 using namespace cv;
 
+//git hub test
 
 Stitcher::Mode mode = Stitcher::PANORAMA;
 
