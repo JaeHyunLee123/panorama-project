@@ -3,11 +3,9 @@
 #include <vector>
 #include <array>
 
+
 using namespace std;
 using namespace cv;
-
-
-Stitcher::Mode mode = Stitcher::PANORAMA;
 
 Mat stitch_two_image(Mat original_image, Mat object_image);
 
@@ -42,14 +40,12 @@ int main()
 		resize(frames[i], frames[i], Size(0, 0), 0.5, 0.5, INTER_LINEAR);
 	}
 
-	Mat result = stitch_two_image(frames[5], frames[6]);
+	Mat result = stitch_two_image(frames[0], frames[1]);
+	//Mat result2 = stitch_two_image(result, frames[2]);
+	//Mat result3 = stitch_two_image(result2, frames[3]);
+
 	
-	/*for (int i = 2; i < frames.size(); i++) {
-		result = stitch_two_image(result, frames[i]);
-		cout << "Stitching image: " << i << "/" << frames.size() << endl;
-	}
-	*/
-    for (int i = 7; i <12; i++) {
+	for (int i = 2; i < 10; i++) {
 		result = stitch_two_image(result, frames[i]);
 		cout << "Stitching image: " << i << "/" << frames.size() << endl;
 	}
@@ -58,10 +54,15 @@ int main()
 	
 	imshow("result", result);
 
+	//imshow("result2", result2);
+	//imshow("result3", result3);
+
 	waitKey(0);
 
 	return 0;
 }
+
+
 
 Mat stitch_two_image(Mat original_image, Mat object_image) {
 	// SIFT 특징점 검출기 초기화
@@ -77,110 +78,98 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	cv::BFMatcher bf(cv::NORM_L2);
 	std::vector<cv::DMatch> matches;
 	bf.match(descriptors1, descriptors2, matches);
+	std::sort(matches.begin(), matches.end());
+
+	int vSize = 0;
+	if (matches.size() >= 50)
+		vSize = 50;
+	else
+		vSize = matches.size();
+
 
 	// 좋은 매칭 선택
-	std::vector<cv::DMatch> good_matches;
-	double min_dist = 100;
-	double max_dist = 0;
+	std::vector<cv::DMatch> good_matches(matches.begin(), matches.begin() + vSize);
+	//double min_dist = 30;
+	//double max_dist = 0;
+
+	/*
+		//min-max 
 	for (int i = 0; i < descriptors1.rows; i++) {
 		double dist = matches[i].distance;
 		if (dist < min_dist) min_dist = dist;
 		if (dist > max_dist) max_dist = dist;
 	}
+
+	// good match 실행
 	for (int i = 0; i < descriptors1.rows; i++) {
-		if (matches[i].distance < 2 * min_dist) {
+		if (matches[i].distance < 3 * min_dist) {
 			good_matches.push_back(matches[i]);
 		}
 	}
+		
+	*/
+
 
 	// 좋은 매칭으로 객체 위치 찾기
 	std::vector<cv::Point2f> src_pts, dst_pts;
 	for (int i = 0; i < good_matches.size(); i++) {
 		src_pts.push_back(keypoints1[good_matches[i].queryIdx].pt);
-		dst_pts.push_back(keypoints2[good_matches[i].trainIdx].pt);
+		dst_pts.push_back(keypoints2[good_matches[i].trainIdx].pt);		
 	}
-
-	//두 좌표의 y값의 차이를 저장하기 위한 변수
-	//10 단위씩 끊어서 저장
-	int* subtraction = new int[26];
-	memset(subtraction, 0, 26);
-
-	// 매칭된 좌표 출력
-	for (size_t i = 0; i < good_matches.size(); i++) {
-		cv::Point2i point1 = src_pts[i];
-		cv::Point2i point2 = dst_pts[i];
-		subtraction[point2.y / 10] = point1.y - point2.y;
-	}
-
-	//subtraction의 값을 interpolation으로 정한다.
-	if (subtraction[0] == 0)
-		subtraction[0] = subtraction[1] / 2;
-
-	for (int i = 1; i < 25; i++) {
-		if (subtraction[i] == 0)
-			subtraction[i] = (subtraction[i-1] + subtraction[i + 1]) / 2;
-	}
-
-	if (subtraction[25] == 0)
-		subtraction[25] = subtraction[24] / 2;
 
 	// 변환 행렬 계산
-	cv::Mat H = cv::findHomography(dst_pts, src_pts, cv::RANSAC);
-	// 객체 이미지를 원본 이미지에 붙이기
+	Mat H = findHomography(dst_pts, src_pts, cv::RANSAC);
+
+	// 변환행렬을 적용해 object_on_original에 저장 
 	cv::Mat object_on_original;
-	cv::warpPerspective(object_image, object_on_original, H, original_image.size());
-
-	// 이미지 합성
-	cv::Mat complementSet = original_image.clone(); // 원본 이미지 복제
-
-	int max_pixel = complementSet.cols;
-	bool max = true;
-
-
-	// object_on_original를 뺀 부분을 검은색으로 채우기
-	for (int i = 0; i < complementSet.rows; i++) {
-		for (int j = 0; j < complementSet.cols; j++) {
+	cv::warpPerspective(object_image, object_on_original, H, Size(original_image.cols + object_image.cols, original_image.rows), INTER_CUBIC);
+	
+	//imshow("object_on_original", object_on_original);
+	
+	/*
+	int max_pixel = 0;
+	// object_on_original에서 검정 부분 중 가장 긴 부분을 찾기 위한 반복문
+	//위아래의 애매하게 검은 부분을 지우기 위함
+	for (int i = 0; i < object_on_original.rows; i++) {
+		for (int j = 0; j < object_on_original.cols; j++) {
 			if (object_on_original.at<cv::Vec3b>(i, j) != cv::Vec3b(0, 0, 0)) {
-				complementSet.at<cv::Vec3b>(i, j) = cv::Vec3b(0, 0, 0); // 검은색으로 설정
-				if (max == true)
-				{
-					max_pixel = cv::min(max_pixel, j);
-					max = false;
-				}
+				max_pixel = cv::max(max_pixel, j);
+				break;
 			}
-			max = true;
+		}
+	}
+	*/
+	
+
+
+	//영상을 하나로 합치기
+	for (int i = 0; i < original_image.rows; i++) {
+		for (int j = 0; j < original_image.cols; j++) {
+			object_on_original.at<cv::Vec3b>(i, j) = original_image.at<cv::Vec3b>(i, j);
 		}
 	}
 
-	//새로운 크기의 Mat 생성
-	cv::Mat result = cv::Mat::zeros(object_image.rows, max_pixel + object_image.cols, CV_8UC3);
+	//검은 부분 지우기
+	//일단 col을 가장 작게하는 방향으로 해봄
+	int min_pixel = object_on_original.cols;
+	for (int i = object_on_original.rows -1; i >= 0; i--) {
+		for (int j = object_on_original.cols -1; j >= 0; j--) {
+			if (object_on_original.at<cv::Vec3b>(i, j) != cv::Vec3b(0, 0, 0)){
+				min_pixel = cv::min(min_pixel, j);
+				break;
+			}
+		}
+	}
+	
 
-	//앞은 첫번째 이미지, 뒤는 두번째 이미지 채워넣기
+	//결과를 저장할 mat 생성 후 데이터 옮기기
+	Mat result = Mat::zeros(object_on_original.rows,  min_pixel,CV_8UC3);
 	for (int i = 0; i < result.rows; i++) {
-		for (int j = 0; j < max_pixel; j++) {
-			result.at<cv::Vec3b>(i, j) = original_image.at<cv::Vec3b>(i, j);
+		for (int j = 0; j < result.cols; j++) {
+			result.at<cv::Vec3b>(i, j) = object_on_original.at<cv::Vec3b>(i, j);
 		}
 	}
 
-	for (int yValue = 0; yValue < 26; yValue) {
-		//subtraction이 양수일 때
-		if (subtraction[yValue] > 0) {
-			for (int i = yValue * 10; i < (yValue + 1) * 10 - subtraction[yValue]; i++) {
-				for (int j = max_pixel; j < result.cols; j++) {
-					result.at<cv::Vec3b>(i, j) = object_image.at<cv::Vec3b>(i + subtraction[yValue], j - max_pixel);
-				}
-			}
-		}
-		else {
-			subtraction[yValue] = -subtraction[yValue];
-			for (int i = yValue * 10 + subtraction[yValue]; i < (yValue + 1) * 10; i++) {
-				for (int j = max_pixel; j < result.cols; j++) {
-					result.at<cv::Vec3b>(i, j) = object_image.at<cv::Vec3b>(i - subtraction[yValue], j - max_pixel);
-				}
-			}
-		}
-
-	}
 	
 	return result;
 }
