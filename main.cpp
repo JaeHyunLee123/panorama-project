@@ -3,6 +3,7 @@
 #include <vector>
 #include <array>
 
+int index12 = 1;
 
 using namespace std;
 using namespace cv;
@@ -15,62 +16,84 @@ int main()
 	VideoCapture video("panorama_video_sampe2.mp4");
 
 	int totalFrames = video.get(CAP_PROP_FRAME_COUNT);
-	int skippingFrames = totalFrames / 20;
+	float skippingFrames = totalFrames / 19.0;
 
 	if (skippingFrames == 0) skippingFrames = 1;
 
 	cout << "Total frames:" << totalFrames << endl;
 
-	for (int i = 0; i < totalFrames; i += skippingFrames) {
+	for (float i = 0; i < totalFrames; i += skippingFrames) {
 		Mat temp;
-		video.set(CAP_PROP_POS_FRAMES, i);
+		video.set(CAP_PROP_POS_FRAMES, static_cast<int>(i));
 
 		video >> temp;
 		frames.push_back(temp);
 
-		if (i % 10 == 0) cout << "Loading video :" << i << "/" << totalFrames << endl;
+		if (static_cast<int>(i) % 10 == 0) cout << "Loading video :" << static_cast<int>(i) << "/" << totalFrames << endl;
 	}
-
-	Mat lastFrame;
-	video.set(CAP_PROP_POS_FRAMES, totalFrames - 1);
-	video >> lastFrame;
-	frames.push_back(lastFrame);
+	
 
 	for (int i = 0; i < frames.size(); i++) {
 		resize(frames[i], frames[i], Size(0, 0), 0.5, 0.5, INTER_LINEAR);
 	}
 
-	Mat result = stitch_two_image(frames[10], frames[11]);
-	//Mat result2 = stitch_two_image(result, frames[9]);
-	//Mat result3 = stitch_two_image(result2, frames[10]);
 
 	/*
-	for (int i = 2; i < 9; i++) {
-		result = stitch_two_image(result, frames[i]);
-		cout << "Stitching image: " << i << "/" << frames.size() << endl;
+	midIndex += 3;
+	Mat result1 = stitch_two_image(frames[midIndex], frames[midIndex + 1]);
+	flip(result1, result1, 1);
+	flip(frames[midIndex - 1], frames[midIndex - 1], 1);
+	result1 = stitch_two_image(result1, frames[midIndex - 1]);
+	flip(result1, result1, 1);
+	cout << "Stitching image Right: " << endl;
+
+	midIndex += 3;
+	Mat result2 = stitch_two_image(frames[midIndex], frames[midIndex + 1]);
+	flip(result2, result2, 1);
+	flip(frames[midIndex - 1], frames[midIndex - 1], 1);
+	result2 = stitch_two_image(result2, frames[midIndex - 1]);
+	flip(result2, result2, 1);
+	cout << "Stitching image Right: " << endl;
+
+	Mat result3 = stitch_two_image(result1, result2);
+	flip(result3, result3, 1);
+	flip(result0, result0, 1);
+	result3 = stitch_two_image(result3, result0);
+	flip(result3, result3, 1);
+	cout << "Stitching image Right: " << endl;
+	
+	*/
+	//stitching을 수행할 때 가운데 이미지를 기준으로 오른쪽으로 스티칭하고 flip을 통해 왼쪽으로 스티칭 후 합친다.
+	int midIndex = frames.size() / 2;
+	Mat result0 = stitch_two_image(frames[midIndex], frames[midIndex + 1]);
+	flip(result0, result0, 1);
+	flip(frames[midIndex - 1], frames[midIndex - 1], 1);
+	result0 = stitch_two_image(result0, frames[midIndex - 1]);
+	flip(result0, result0, 1);
+	cout << "Stitching image Right: "  << endl;
+
+	
+	
+	//오른쪽 연산 수행
+	//Mat resultRight = stitch_two_image(frames[midIndex], frames[midIndex + 1]);
+	//Mat resultRight1 = stitch_two_image(resultRight, frames[midIndex + 2]);
+
+	//왼쪽 연산 수행
+	//Mat resultRight2 = stitch_two_image(resultRight1, frames[midIndex + 3]);
+	//Mat resultRight3 = stitch_two_image(resultRight2, frames[midIndex + 4]);
+	/*
+		for (int i = midIndex + 2; i < frames.size(); i++) {
+		imshow("resultRight", resultRight);
+		waitKey(1);
+		resultRight = stitch_two_image(resultRight, frames[i]);
+		cout << "Stitching image Right: " << i << "/" << frames.size() << endl;	
 	}
 	*/
 	
 	
-
 	
-	
-	
-	imshow("result", result);
-	//imshow("result2", result2);
 	//imshow("result3", result3);
-	//imshow("0", frames[0]);
-	//imshow("1", frames[1]);
-	//imshow("2", frames[2]);
-	//imshow("3", frames[3]);
-	//imshow("4", frames[4]);
-	//imshow("5", frames[5]);
-	//imshow("6", frames[6]);
-	imshow("7", frames[7]);
-	imshow("8", frames[8]);
-	imshow("9", frames[9]);
-	imshow("10", frames[10]);
-
+	//imwrite("9_17.jpg", result3);
 	waitKey(0);
 
 	return 0;
@@ -98,7 +121,7 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	std::vector<cv::DMatch> matches;
 	bf.match(descriptors1, descriptors2, matches);
 
-
+	
 	std::sort(matches.begin(), matches.end());
 
 	int vSize = 0;
@@ -107,9 +130,11 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	else
 		vSize = matches.size();
 
-			// 좋은 매칭 선택
+	// 좋은 매칭 선택
 	std::vector<cv::DMatch> good_matches(matches.begin(), matches.begin() + vSize);
 	
+	
+
 	/*
 	// 좋은 매칭 선택
 	std::vector<cv::DMatch> good_matches;
@@ -130,7 +155,9 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 			good_matches.push_back(matches[i]);
 		}
 	}
-*/
+	*/
+	
+
 
 
 	// 좋은 매칭으로 객체 위치 찾기
@@ -143,11 +170,10 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	
 	//매칭 시각화
 	Mat visualMatching;
-	drawMatches(original_image, keypoints1, object_image, keypoints2, good_matches, visualMatching);
-	imshow("matching point", visualMatching);
-	
-
-
+	drawMatches(originalCutImage, keypoints1, object_image, keypoints2, good_matches, visualMatching);
+	//imshow("matching point", visualMatching);
+	string str = "Result" + to_string(index12) + ".jpg";
+	imwrite(str, visualMatching);
 
 	// 변환 행렬 계산
 	Mat H = findHomography(dst_pts, src_pts, cv::RANSAC);
@@ -157,8 +183,8 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	cv::warpPerspective(object_image, object_on_original, H, Size(object_image.cols * 2, object_image.rows), INTER_CUBIC);
 	
 	
-	imshow("object_on_original", object_on_original);
-	/*
+	//imshow("object_on_original", object_on_original);
+	
 	int max_pixel = 0;
 	// object_on_original에서 검정 부분 중 가장 긴 부분을 찾기 위한 반복문
 	//위아래의 애매하게 검은 부분을 지우기 위함
@@ -170,7 +196,6 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 			}
 		}
 	}
-	*/
 	
 	
 	//originalCutImage와 object_image를 하나로 합치기
