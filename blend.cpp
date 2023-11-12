@@ -7,50 +7,70 @@ using namespace cv;
 
 namespace blend {
 
-	Mat blendImage(Mat image, int center, int blendingArea) {
+	Mat blendImage(Mat image, int center, int blendingArea, int errorRange) {
 		Mat result = image.clone();
 
 		for (int row = 0; row < image.rows; row++) {
-			for (int i = 0; i < blendingArea; i++) {
+			//오차 범위 내 처리
+			for (int i = 0; i < blendingArea / 2 - errorRange; i++) {
 				//center를 기준으로 대칭되는 픽셀의 값을 가져온다
-				int targetCol = center - blendingArea / 2 + i;
-				int referenceCol = center + blendingArea / 2 - i;
+				int leftCol = center - blendingArea / 2 + i;
+				int rightCol = center + blendingArea / 2 - i;
 
-				RGB targetRGB = getRGB(image, targetCol, row);
-				RGB referenceRGB = getRGB(image, referenceCol, row);
+				RGB leftRGB = getRGB(image, leftCol, row);
+				RGB rightRGB = getRGB(image, rightCol, row);
 
 				//가져온 픽셀 값을 hsi 값으로 바꾼다
-				HSI targetHSI = rgb2hsi(targetRGB);
-				HSI referenceHSI = rgb2hsi(referenceRGB);
+				HSI leftHSI = rgb2hsi(leftRGB);
+				HSI rightHSI = rgb2hsi(rightRGB);
 
 				//intensity 값으로 알파 블렌딩을 진행한다.
 				double alpha = (double)i / blendingArea;
-				if (alpha > 0.5) {
-					targetHSI.intensity = alpha * targetHSI.intensity + (1 - alpha) * referenceHSI.intensity;
-				}
-				else {
-					targetHSI.intensity = (1 - alpha) * targetHSI.intensity + alpha * referenceHSI.intensity;
-				}
+
+				int tempIntensity = leftHSI.intensity;
+				leftHSI.intensity = (1 - alpha) * leftHSI.intensity + alpha * rightHSI.intensity;
+				rightHSI.intensity = alpha * tempIntensity + (1 - alpha) * rightHSI.intensity;
+
 
 				//다시 rgb 값으로 바꾼 후 저장
-				targetRGB = hsi2rgb(targetHSI);
+				leftRGB = hsi2rgb(leftHSI);
+				rightRGB = hsi2rgb(rightHSI);
 
-				putRGB(result, targetRGB, targetCol, row);
+				putRGB(result, leftRGB, leftCol, row);
+				putRGB(result, rightRGB, rightCol, row);
 			}
 
-			//딱 중간에 있는 값 처리
-			RGB centerRGB = getRGB(result, center, row);
-			RGB leftRGB = getRGB(result, center - 1, row);
-			RGB rightRGB = getRGB(result, center + 1, row);
+			//오차범위 바로 바깥의 값 평균으로 오차범위 내 intensity 조정
+			RGB leftStandardRGB = getRGB(result, center - errorRange, row);
+			RGB rightStandardRGB = getRGB(result, center + errorRange, row);
 
-			HSI centerHSI = rgb2hsi(centerRGB);
-			HSI leftHSI = rgb2hsi(leftRGB);
-			HSI rightHSI = rgb2hsi(rightRGB);
+			HSI leftStandardHSI = rgb2hsi(leftStandardRGB);
+			HSI rightStandardHSI = rgb2hsi(rightStandardRGB);
+			int average = (leftStandardHSI.intensity + rightStandardHSI.intensity) / 2;
 
-			centerHSI.intensity = (leftHSI.intensity + rightHSI.intensity) / 2;
+			for (int i = blendingArea / 2 - errorRange; i <= blendingArea / 2; i++) {
+				//center를 기준으로 대칭되는 픽셀의 값을 가져온다
+				int leftCol = center - blendingArea / 2 + i;
+				int rightCol = center + blendingArea / 2 - i;
 
-			centerRGB = hsi2rgb(centerHSI);
-			putRGB(result, centerRGB, center, row);
+				RGB leftRGB = getRGB(image, leftCol, row);
+				RGB rightRGB = getRGB(image, rightCol, row);
+
+				//가져온 픽셀 값을 hsi 값으로 바꾼다
+				HSI leftHSI = rgb2hsi(leftRGB);
+				HSI rightHSI = rgb2hsi(rightRGB);
+
+				//오차범위 바로 바깥의 intensity의 평균값 사용
+				leftHSI.intensity = average;
+				rightHSI.intensity = average;
+
+				//다시 rgb 값으로 바꾼 후 저장
+				leftRGB = hsi2rgb(leftHSI);
+				rightRGB = hsi2rgb(rightHSI);
+
+				putRGB(result, leftRGB, leftCol, row);
+				putRGB(result, rightRGB, rightCol, row);
+			}
 		}
 
 		return result;
