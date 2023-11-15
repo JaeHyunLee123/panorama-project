@@ -35,7 +35,7 @@ int main()
 		resize(frames[i], frames[i], Size(0, 0), 0.5, 0.5, INTER_LINEAR);
 	}
 
-	Mat result0 = stitch_two_image(frames[10], frames[11]);
+	Mat result0 = stitch_two_image(frames[11], frames[12]);
 	//Mat result1 = stitch_two_image(result0, frames[13]);
 
 	//stitching을 수행할 때 가운데 이미지를 기준으로 오른쪽으로 스티칭하고 flip을 통해 왼쪽으로 스티칭 후 합친다.
@@ -157,6 +157,7 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 
 	//originalCutImage와 object_image를 하나로 합치기
 	//검은 영역에만 영상을 덧붙인다.
+	//이때 가장 작은 row와 큰 row에서 만나는 좌표를 저장한다.
 	int topCol = 0;
 	int bottomCol = 0;
 	for (int i = 0; i < originalCutImage.rows; i++) {
@@ -165,7 +166,9 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 				object_on_original.at<cv::Vec3b>(i + 100, j) = originalCutImage.at<cv::Vec3b>(i, j);
 			else {
 				for (int x = 0; x < 10; x++) {
-					object_on_original.at<cv::Vec3b>(i + 100, j + x) = originalCutImage.at<cv::Vec3b>(i, j + x);					
+					//인덱스 오버를 막기 위한 조건문
+					if(j + x < originalCutImage.cols)
+						object_on_original.at<cv::Vec3b>(i + 100, j + x) = originalCutImage.at<cv::Vec3b>(i, j + x);					
 				}
 				
 				//경계선 중 가장 위의 값과 가장 밑의 값을 저장한다.
@@ -179,8 +182,7 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	}
 	imshow("object_on_original1", object_on_original);
 	
-	//검은 부분 지우기
-	//일단 col을 가장 작게하는 방향으로 해봄
+	//이미지의 오른쪽 부분에서 튀어나온 부분을 검출하기 위한 반복문
 	int minCol = object_on_original.cols;
 	int minRow = 0;
 	int maxCol = 0;
@@ -190,7 +192,7 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 			if (object_on_original.at<cv::Vec3b>(i, j) != cv::Vec3b(0, 0, 0)) {
 				minCol = min(minCol, j);
 				maxCol = max(maxCol, j);
-
+ 
 				//minCol이나 maxCol이 갱신되었을 때 minRow와 maxRow 초기화
 				if (minCol == j)
 					minRow = i;
@@ -201,29 +203,35 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 
 		}
 	}
-	minCol++;
-	maxCol++;
 
 	//이미지 수정
 	//좌표 순서 : 상단왼쪽 끝, 상단오른쪽 끝, 하단왼쪽 끝, 하단오른쪽 끝
+	//행렬에서 성분은 (row, col)이지만 좌표는 (x,y)이고 x는 가로 y는 세로 방향이다.
 	vector<cv::Point2f> inputPts, outputPts;
 	if (minRow < maxRow) {
-		inputPts.push_back(Point2f(100, topCol ));
-		inputPts.push_back(Point2f(minRow, minCol));
-		inputPts.push_back(Point2f(originalCutImage.rows - 1 + 100, bottomCol));
-		inputPts.push_back(Point2f(maxRow , maxCol));
+		inputPts.push_back(Point2f(topCol, 100));
+		inputPts.push_back(Point2f(minCol, minRow));
+		inputPts.push_back(Point2f(bottomCol, originalCutImage.rows - 1 + 100));
+		inputPts.push_back(Point2f(maxCol, maxRow));
 	}
 	else {
-		inputPts.push_back(Point2f(100, topCol));
-		inputPts.push_back(Point2f(maxRow, maxCol));
-		inputPts.push_back(Point2f(originalCutImage.rows - 1 + 100, bottomCol));
-		inputPts.push_back(Point2f(minRow , minCol));
+		inputPts.push_back(Point2f(topCol, 100));
+		inputPts.push_back(Point2f(maxCol, maxRow));
+		inputPts.push_back(Point2f(bottomCol, originalCutImage.rows - 1 + 100));
+		inputPts.push_back(Point2f(minCol, minRow));
 	}
 
-	outputPts.push_back(Point2f(0, topCol));
-	outputPts.push_back(Point2f(0, minCol));
-	outputPts.push_back(Point2f(originalCutImage.rows - 1, bottomCol));
-	outputPts.push_back(Point2f(originalCutImage.rows - 1, minCol));
+	circle(object_on_original, Point2f(topCol, 100), 3, Scalar(0, 0, 255), 3);
+	circle(object_on_original, Point2f(minCol, minRow), 3, Scalar(0, 255, 0), 3);
+	circle(object_on_original, Point2f(bottomCol, originalCutImage.rows - 1 + 100), 3, Scalar(255, 0, 0), 3);
+	circle(object_on_original, Point2f(maxCol, maxRow), 3, Scalar(255, 255, 255), 3);
+	
+
+	outputPts.push_back(Point2f(topCol, 100));
+	outputPts.push_back(Point2f(minCol, 100));
+	outputPts.push_back(Point2f(bottomCol, originalCutImage.rows - 1 + 100));
+	outputPts.push_back(Point2f(minCol, originalCutImage.rows - 1 + 100));
+	imshow("object_on_original2", object_on_original);
 
 	//변환행렬 생성
 	Mat M = getPerspectiveTransform(inputPts, outputPts);
