@@ -36,7 +36,12 @@ int main()
 	}
 
 	Mat result0 = stitch_two_image(frames[11], frames[12]);
-	Mat result1 = stitch_two_image(result0, frames[13]);
+
+	/*for (int i = 13; i < 15; i++) {
+		result0 = stitch_two_image(result0, frames[i]);
+	}*/
+
+	//Mat result1 = stitch_two_image(result0, frames[13]);
 
 	//stitching을 수행할 때 가운데 이미지를 기준으로 오른쪽으로 스티칭하고 flip을 통해 왼쪽으로 스티칭 후  합친다.
 	/*int midIndex = frames.size() / 2;
@@ -65,7 +70,7 @@ int main()
 
 	
 	imshow("result0", result0);
-	imshow("result1", result1);
+	//imshow("result1", result1);
 	waitKey(0);
 
 	return 0;
@@ -79,67 +84,109 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	original_image(Rect(original_image.cols - originalCutImage.cols, 0, originalCutImage.cols, originalCutImage.rows)).
 		copyTo(originalCutImage(Rect(0, 0, originalCutImage.cols, originalCutImage.rows)));
 
-	// SIFT 특징점 검출기 초기화
-	cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
+	// ORB 특징점 검출기 초기화
+	int minHessian = 1000;
+	cv::Ptr<cv::ORB> orb = cv::ORB::create(minHessian);
 
 	// 특징점 및 기술자 추출
 	std::vector<cv::KeyPoint> keypoints1, keypoints2;
 	cv::Mat descriptors1, descriptors2;
-	sift->detectAndCompute(originalCutImage, cv::Mat(), keypoints1, descriptors1);
-	sift->detectAndCompute(object_image, cv::Mat(), keypoints2, descriptors2);
+	orb->detectAndCompute(originalCutImage, noArray(), keypoints1, descriptors1);
+	orb->detectAndCompute(object_image, noArray(), keypoints2, descriptors2);
 
-	// BFMatcher로 특징점 매칭
-	cv::BFMatcher bf(cv::NORM_L2);
-	std::vector<cv::DMatch> matches;
-	bf.match(descriptors1, descriptors2, matches);
-
+	//-- Step 2: Matching descriptor vectors with a brute force matcher
+	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create(DescriptorMatcher::BRUTEFORCE);
+	std::vector< std::vector<DMatch> > knn_matches;
+	matcher->knnMatch(descriptors1, descriptors2, knn_matches, 2);
 	
-	/*std::sort(matches.begin(), matches.end());
+	//좋은 매칭점 선택
+	//1.Filter matches using the Lowe's ratio test
+	const float ratio_thresh = 0.7f;
+	std::vector<DMatch> first_good_matches;
+	for (size_t i = 0; i < knn_matches.size(); i++)
+	{
+		if (knn_matches[i].size() == 2) {
+			if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance)
+			{
+				first_good_matches.push_back(knn_matches[i][0]);
+			}
+		}	
+	}
 
-	int vsize = 0;
-	if (matches.size() >= 50)
-		vsize = 50;
-	else
-		vsize = matches.size();*/
 
-	// 좋은 매칭 선택
-	//std::vector<cv::DMatch> good_matches(matches.begin(), matches.begin() + vsize);
-	
-		
-	// 좋은 매칭 선택
-	std::vector<cv::DMatch> good_matches;
-	double min_dist = 50;
-	double max_dist = 0;
+	//2. gradient로 나누기
+	// 객체 위치 찾기
+	std::vector<cv::Point2f> src_pts, dst_pts;
+	int gradientValue[11] = { 0, }; // -0.5~ 0.5로 0.1씩
+	std::vector<std::vector<int>> gradientIndex(11); //해당하는 인덱스 저장
+	float tmp = 0.0f;
+	int tmpIndex = 0;
 
-	
-	//min-max 
-	for (int i = 0; i < descriptors1.rows; i++) {
-		double dist = matches[i].distance;
-		if (dist < min_dist) min_dist = dist;
-		if (dist > max_dist) max_dist = dist;
+	for (int i = 0; i < first_good_matches.size(); i++) {
+		src_pts.push_back(keypoints1[first_good_matches[i].queryIdx].pt);
+		dst_pts.push_back(keypoints2[first_good_matches[i].trainIdx].pt);
+
+		//gradient 계산 및 저장
+		tmp = ((float)(dst_pts[i].y - src_pts[i].y)) / ((float)(dst_pts[i].x - src_pts[i].x));
+		tmpIndex = (int)(tmp * 10 + 5);
+		if (tmpIndex >= 0 && tmpIndex < 11) {
+			gradientValue[tmpIndex] = gradientValue[tmpIndex] + 1;
+			gradientIndex[tmpIndex].push_back(i);
+		}
+			
+	}
+
+	//가장 큰 값이 저장된 index만 살리고 나머지는 버린다.
+	int maxIndex = 0;
+	for (int i = 1; i < 11; i++) {
+		if (gradientValue[maxIndex] < gradientValue[i])
+			maxIndex = i;
+	}
+
+	std::vector<DMatch> second_good_matches;
+	for (int i = 0; i < gradientValue[maxIndex]; i++) {
+		second_good_matches.push_back(first_good_matches[gradientIndex[maxIndex][i]]);
+	}
+
+	//3. 최단 거리를 구해 오차 제거
+	std::vector<cv::DMatch> third_good_matches;
+	double min_dist = originalCutImage.cols;
+
+	//최단 거리 구하기
+	for (int i = 0; i < second_good_matches.size(); i++) {
+		double dist = second_good_matches[i].distance;
+		cout << dist << endl;
+		if (dist < min_dist)
+			min_dist = dist;
 	}
 
 	// good match 실행
-	for (int i = 0; i < descriptors1.rows; i++) {
-		if (matches[i].distance < 2 * min_dist) {
-			good_matches.push_back(matches[i]);
-		}
+	for (int i = 0; i < second_good_matches.size(); i++) {
+		if (second_good_matches[i].distance < 2 * min_dist)
+			third_good_matches.push_back(second_good_matches[i]);		
 	}
-	
-	
+
 
 	// 좋은 매칭으로 객체 위치 찾기
-	std::vector<cv::Point2f> src_pts, dst_pts;
-	for (int i = 0; i < good_matches.size(); i++) {
-		src_pts.push_back(keypoints1[good_matches[i].queryIdx].pt);
-		dst_pts.push_back(keypoints2[good_matches[i].trainIdx].pt);		
+	src_pts.clear();
+	dst_pts.clear();
+	for (int i = 0; i < second_good_matches.size(); i++) {
+		src_pts.push_back(keypoints1[second_good_matches[i].queryIdx].pt);
+		dst_pts.push_back(keypoints2[second_good_matches[i].trainIdx].pt);
 	}
 
-	
-	//매칭 시각화
-	Mat visualMatching;
-	drawMatches(originalCutImage, keypoints1, object_image, keypoints2, good_matches, visualMatching);
-	imshow("matching point", visualMatching);
+
+	//매칭점 시각화
+	Mat img_matches;
+	drawMatches(originalCutImage, keypoints1, object_image, keypoints2, first_good_matches, img_matches);
+	Mat img_matches2;
+	drawMatches(originalCutImage, keypoints1, object_image, keypoints2, second_good_matches, img_matches2);
+	Mat img_matches3;
+	drawMatches(originalCutImage, keypoints1, object_image, keypoints2, third_good_matches, img_matches3);
+	imshow("img_matches", img_matches);
+	imshow("img_matches2", img_matches2);
+	imshow("img_matches3", img_matches3);
+	//waitKey(0);
 
 
 	// 변환 행렬 계산 -> CV_64F
@@ -151,7 +198,7 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	Mat translateH =  translate100 * H;
 
 	// 변환행렬을 적용해 object_on_original에 저장 
-	Mat object_on_original;
+	Mat object_on_original = Mat::zeros(object_image.cols * 2, object_image.rows * 2, CV_8UC3);
 	cv::warpPerspective(object_image, object_on_original, translateH, Size(object_image.cols * 2, object_image.rows * 2), INTER_CUBIC);
 	imshow("object_on_original", object_on_original);
 
@@ -165,7 +212,7 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 			if(object_on_original.at<cv::Vec3b>(i + 100, j) ==  Vec3b(0,0,0))
 				object_on_original.at<cv::Vec3b>(i + 100, j) = originalCutImage.at<cv::Vec3b>(i, j);
 			else {
-				for (int x = 0; x < 10; x++) {
+				for (int x = 0; x < 15; x++) {
 					//인덱스 오버를 막기 위한 조건문
 					if(j + x < originalCutImage.cols)
 						object_on_original.at<cv::Vec3b>(i + 100, j + x) = originalCutImage.at<cv::Vec3b>(i, j + x);					
@@ -181,6 +228,7 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 		}
 	}
 	imshow("object_on_original1", object_on_original);
+
 	
 	//이미지의 오른쪽 부분에서 튀어나온 부분을 검출하기 위한 반복문
 	//두 좌표의 값을 위한 4개의 변수
@@ -272,11 +320,11 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 		inputPts.push_back(Point2f(minCol, minRow));
 	}
 
-	//원 생성
-	/*circle(object_on_original, Point2f(topCol, 100), 3, Scalar(0, 0, 255), 3);
-	circle(object_on_original, Point2f(minCol, minRow), 3, Scalar(0, 255, 0), 3);
-	circle(object_on_original, Point2f(bottomCol, originalCutImage.rows - 1 + 100), 3, Scalar(255, 0, 0), 3);
-	circle(object_on_original, Point2f(maxCol, maxRow), 3, Scalar(255, 255, 255), 3);*/
+	////원 생성
+	//circle(object_on_original, Point2f(topCol, 100), 3, Scalar(0, 0, 255), 3);
+	//circle(object_on_original, Point2f(minCol, minRow), 3, Scalar(0, 255, 0), 3);
+	//circle(object_on_original, Point2f(bottomCol, originalCutImage.rows - 1 + 100), 3, Scalar(255, 0, 0), 3);
+	//circle(object_on_original, Point2f(maxCol, maxRow), 3, Scalar(255, 255, 255), 3);
 	
 
 	outputPts.push_back(Point2f(topCol, 100));
@@ -292,25 +340,52 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	warpPerspective(object_on_original, anotherM, M, object_on_original.size(), INTER_CUBIC);
 	imshow("M", anotherM);
 
+	//M의 끝점을 알아야된다.
+	int mRightCols =0;
+	for (int i = anotherM.rows - 1; i >= 0; i--) {
+		for (int j = anotherM.cols -1; j >= 0; j--) {
+			if (anotherM.at<Vec3b>(i, j) != Vec3b(0, 0, 0))
+				mRightCols = max(mRightCols, j);
+		}
+	}
+
+	////object_on_original과 M을 결합한 Mat 생성 및 값 삽입
+	////빨간점과 파란점을 이은 직선을 경계로 두 이미지를 합친다.
+	//float line = (float)(topCol - bottomCol) / (float)originalCutImage.rows;
+	//Mat combineImg(originalCutImage.rows, minCol, CV_8UC3);
+	//for (int i = 0; i < originalCutImage.rows; i++) {
+	//	for (int j = 0; j < minCol; j++) {
+	//		//topCol이 bottomCol보다 큰 경우 빼주고 반대인 경우에는 더한다.
+	//		if (topCol >= bottomCol) {
+	//			if (i < topCol - (int)(line * i))
+	//				combineImg.at<Vec3b>(i,j) = object_on_original.at<Vec3b>(i + 100, j);
+	//			else
+	//				combineImg.at<Vec3b>(i, j) = anotherM.at<Vec3b>(i + 100, j);
+	//		}
+	//		else {
+	//			if (i < topCol + (int)(line * i))
+	//				combineImg.at<Vec3b>(i, j) = object_on_original.at<Vec3b>(i + 100, j);
+	//			else
+	//				combineImg.at<Vec3b>(i, j) = anotherM.at<Vec3b>(i + 100, j);
+	//		}		
+	//	}
+	//}
 	//object_on_original과 M을 결합한 Mat 생성 및 값 삽입
-	//빨간점과 파란점을 이은 직선을 경계로 두 이미지를 합친다.
-	float line = (float)(topCol - bottomCol) / (float)originalCutImage.rows;
-	Mat combineImg(originalCutImage.rows, minCol, CV_8UC3);
+	//topCol과 bottomCol 의 절반만
+	//처음에는 object를 topCol과 bottomCol 중 작은 값만큼 붙인다.
+	//그후 topCol과 bottomCol 의 절반만큼 object를 붙이고 나머지는 M을 mRightCols까지 붙인다.
+	Mat combineImg(originalCutImage.rows, mRightCols, CV_8UC3);
+	int abCol = abs(topCol - bottomCol)/2;
+	int minTopBottomCol = min(topCol, bottomCol);
+
 	for (int i = 0; i < originalCutImage.rows; i++) {
-		for (int j = 0; j < minCol; j++) {
-			//topCol이 bottomCol보다 큰 경우 빼주고 반대인 경우에는 더한다.
-			if (topCol >= bottomCol) {
-				if (i < topCol - (int)(line * i))
-					combineImg.at<Vec3b>(i,j) = object_on_original.at<Vec3b>(i + 100, j);
-				else
-					combineImg.at<Vec3b>(i, j) = anotherM.at<Vec3b>(i + 100, j);
-			}
-			else {
-				if (i < topCol + (int)(line * i))
-					combineImg.at<Vec3b>(i, j) = object_on_original.at<Vec3b>(i + 100, j);
-				else
-					combineImg.at<Vec3b>(i, j) = anotherM.at<Vec3b>(i + 100, j);
-			}		
+		for (int j = 0; j < minTopBottomCol + abCol; j++) {
+			combineImg.at<Vec3b>(i, j) = object_on_original.at<Vec3b>(i + 100, j);
+		}
+	}
+	for (int i = 0; i < originalCutImage.rows; i++) {
+		for (int j = minTopBottomCol + abCol; j < mRightCols; j++) {
+			combineImg.at<Vec3b>(i, j) = anotherM.at<Vec3b>(i + 100, j);
 		}
 	}
 
