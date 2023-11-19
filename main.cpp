@@ -148,22 +148,34 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 		second_good_matches.push_back(first_good_matches[gradientIndex[maxIndex][i]]);
 	}
 
-	//3. 최단 거리를 구해 오차 제거
+	//3. 최단 거리를 구해 오차 제거(물리적 거리)
 	std::vector<cv::DMatch> third_good_matches;
-	double min_dist = originalCutImage.cols;
-
-	//최단 거리 구하기
+	std::vector<double> pointDistance;
+	double distanceMean = 0;
+	double distanceTmp = 0;
+	Point2f oriPoint, objPoint;
 	for (int i = 0; i < second_good_matches.size(); i++) {
-		double dist = second_good_matches[i].distance;
-		cout << dist << endl;
-		if (dist < min_dist)
-			min_dist = dist;
+		oriPoint = keypoints1[second_good_matches[i].queryIdx].pt;
+		objPoint = keypoints2[second_good_matches[i].trainIdx].pt;
+
+		//거리 공식 사용
+		distanceTmp = sqrt(pow(oriPoint.x - objPoint.x - originalCutImage.cols, 2) + pow(oriPoint.y - objPoint.y, 2));
+		pointDistance.push_back(distanceTmp);
+		distanceMean += distanceTmp;
+		cout << distanceTmp << endl;
 	}
 
-	// good match 실행
+	//평균의 +-20퍼센트 정도만 남기고 삭제
+	distanceMean /= second_good_matches.size();
+
 	for (int i = 0; i < second_good_matches.size(); i++) {
-		if (second_good_matches[i].distance < 2 * min_dist)
-			third_good_matches.push_back(second_good_matches[i]);		
+		oriPoint = keypoints1[second_good_matches[i].queryIdx].pt;
+		objPoint = keypoints2[second_good_matches[i].trainIdx].pt;
+
+		//거리 공식 사용
+		distanceTmp = sqrt(pow(oriPoint.x - objPoint.x - originalCutImage.cols, 2) + pow(oriPoint.y - objPoint.y, 2));
+		if (distanceTmp < distanceMean * 1.1 && distanceTmp > distanceMean * 0.9)
+			third_good_matches.push_back(second_good_matches[i]);
 	}
 
 
@@ -186,7 +198,6 @@ Mat stitch_two_image(Mat original_image, Mat object_image) {
 	imshow("img_matches", img_matches);
 	imshow("img_matches2", img_matches2);
 	imshow("img_matches3", img_matches3);
-	//waitKey(0);
 
 
 	// 변환 행렬 계산 -> CV_64F
